@@ -74,3 +74,13 @@ board variants on `gps2ip-ble` pushes. It retains upstream's ESP32 core 3.3.0,
 NimBLE 2.3.8 and other pinned dependencies. New `GPS2IP-lilygo_t_dongle_c5`
 and `GPS2IP-esp32c5devkitc1` artifacts include the merged image and notes.
 Committed old binaries elsewhere in the repository do not contain GPS2IP.
+
+### Local verification results
+
+Both board builds passed with the pinned toolchain. T-Dongle application:
+1,875,239 / 1,966,080 bytes; JCMK host: 1,864,807 / 1,966,080 bytes. Both
+use 60,872 bytes of static RAM. Packet tests passed under address/undefined
+behavior sanitizers (leak detection disabled for the container runtime).
+The native scheduler, existing BLE lifecycle/Node-counter/release-workflow
+checks, and 22 installer/release-bundle unit tests passed. Hardware testing
+is still required for phone pairing, background delivery and Dock Mode.
