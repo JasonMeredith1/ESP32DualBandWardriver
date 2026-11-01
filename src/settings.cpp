@@ -577,6 +577,17 @@ bool Settings::createDefaultSettings(fs::FS &fs, bool spec, uint8_t index, Strin
     jsonBuffer["Settings"][31]["range"]["min"] = "";
     jsonBuffer["Settings"][31]["range"]["max"] = "";
 
+    jsonBuffer["Settings"][32]["name"] = GPS2IP_ENABLED_NAME;
+    jsonBuffer["Settings"][32]["type"] = "bool";
+    jsonBuffer["Settings"][32]["value"] = false;
+    jsonBuffer["Settings"][32]["range"]["min"] = false;
+    jsonBuffer["Settings"][32]["range"]["max"] = true;
+    jsonBuffer["Settings"][33]["name"] = GPS2IP_DEVICE_NAME;
+    jsonBuffer["Settings"][33]["type"] = "String";
+    jsonBuffer["Settings"][33]["value"] = "";
+    jsonBuffer["Settings"][33]["range"]["min"] = "";
+    jsonBuffer["Settings"][33]["range"]["max"] = "";
+
     if (serializeJson(jsonBuffer, settings_string) == 0) {
       Logger::log(WARN_MSG, "Failed to write to string");
     }

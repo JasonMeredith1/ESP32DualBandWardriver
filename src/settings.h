@@ -34,6 +34,8 @@
 #define ADMIN_AP_SSID_NAME "ap_ssid"   // Admin access point SSID (String)
 #define ADMIN_AP_PASS_NAME "ap_pass"   // Admin access point password (String)
 #define CORE_MAC_NAME      "core_mac"  // Node's permitted Core MAC (String)
+#define GPS2IP_ENABLED_NAME "gps2ip"  // opt-in; restart required
+#define GPS2IP_DEVICE_NAME "gps2ip_name"
 #define DEBUG_LOG_NAME     "dbg_en"    // SD debug log enabled (bool)
 // SSID exclusion list keys:  "sx_0" through "sx_9"   (String each)
 // Geofence keys:             "geo_0" through "geo_4" (String, JSON encoded)

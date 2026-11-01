@@ -1,4 +1,9 @@
 #include "GpsInterface.h"
+#include "Gps2ipBLE.h"
+#include "settings.h"
+#include <time.h>
+#include <sys/time.h>
+extern Settings settings;
 
 #ifdef HAS_GPS
 
@@ -11,6 +16,25 @@ MicroNMEA nmea(nmeaBuffer, sizeof(nmeaBuffer));
 HardwareSerial GPS(GPS_SERIAL_INDEX);
 
 void GpsInterface::begin() {
+  // Inspect the stored value before auto-creating the bool key: upstream's
+  // loadSetting<bool>() returns true when a missing key is first created.
+  bool phone = false;
+  DynamicJsonDocument saved(SETTINGS_JSON_SIZE);
+  if (!deserializeJson(saved, settings.getSettingsString())) {
+    for (JsonObject entry : saved["Settings"].as<JsonArray>()) {
+      if (entry["name"].as<String>() == GPS2IP_ENABLED_NAME)
+        phone = entry["value"].as<bool>();
+    }
+  }
+  settings.loadSetting<bool>(GPS2IP_ENABLED_NAME); // migrate older settings
+  String filter = settings.loadSetting<String>(GPS2IP_DEVICE_NAME);
+  gps2ipConfigure(phone, filter);
+  if (phone) {
+    this->disable_queue();
+    Logger::log(STD_MSG, "GPS2IP BLE selected (restart to change GPS source)");
+    return;
+  }
+
   
   GPS.begin(9600, SERIAL_8N1, RX_TO_GPS, TX_TO_GPS);
 
@@ -499,35 +523,62 @@ void GpsInterface::setGPSInfo() {
   //nmea.clear();
 }
 
+bool GpsInterface::usesPhoneGps() { return gps2ipEnabled(); }
+String GpsInterface::getGpsSourceStatus() { return gps2ipStatus(); }
+
+String GpsInterface::getWiglePosition() {
+  if (!gps2ipEnabled())
+    return getLat() + "," + getLon() + "," + String(getAlt()) + "," + String(getAccuracy());
+  Gps2ipFix fix; uint32_t at; bool linked;
+  if (!gps2ipSnapshot(fix, at, linked) || time(nullptr) < 1577836800) return "";
+  // One atomic snapshot per row. Empty fields represent unavailable metrics.
+  return String(fix.lat, 7) + "," + String(fix.lon, 7) + "," +
+         (fix.hasAltitude ? String(fix.altitude, 2) : String("")) + ",";
+}
+
 float GpsInterface::getAccuracy() {
+  if (gps2ipEnabled()) return NAN;
   return this->accuracy;
 }
 
 String GpsInterface::getLat() {
+  if (gps2ipEnabled()) { Gps2ipFix f; uint32_t at; bool linked; gps2ipSnapshot(f,at,linked); return String(f.lat,7); }
   return this->lat;
 }
 
 String GpsInterface::getLon() {
+  if (gps2ipEnabled()) { Gps2ipFix f; uint32_t at; bool linked; gps2ipSnapshot(f,at,linked); return String(f.lon,7); }
   return this->lon;
 }
 
 float GpsInterface::getAlt() {
+  if (gps2ipEnabled()) { Gps2ipFix f; uint32_t at; bool linked; gps2ipSnapshot(f,at,linked); return f.hasAltitude ? f.altitude : NAN; }
   return this->altf;
 }
 
 String GpsInterface::getDatetime() {
+  if (gps2ipEnabled()) {
+    time_t now = time(nullptr); if (now < 1577836800) return "";
+    struct tm utc; gmtime_r(&now,&utc); char value[24];
+    strftime(value,sizeof(value),"%Y-%m-%d %H:%M:%S",&utc); return String(value);
+  }
   return this->datetime;
 }
 
 String GpsInterface::getNumSatsString() {
-  return (String)num_sats;
+  return gps2ipEnabled() ? String("BLE") : String(num_sats);
 }
 
 int GpsInterface::getNumSats() {
+  if (gps2ipEnabled()) return 0;
   return num_sats;
 }
 
 bool GpsInterface::getFixStatus() {
+  if (gps2ipEnabled()) {
+    Gps2ipFix f; uint32_t at; bool linked;
+    return gps2ipSnapshot(f,at,linked) && time(nullptr) >= 1577836800;
+  }
   return this->good_fix;
 }
 
@@ -539,6 +590,7 @@ String GpsInterface::getFixStatusAsString() {
 }
 
 bool GpsInterface::getGpsModuleStatus() {
+  if (gps2ipEnabled()) { Gps2ipFix f; uint32_t at; bool linked; gps2ipSnapshot(f,at,linked); return linked; }
   return this->gps_enabled;
 }
 
@@ -645,6 +697,17 @@ String GpsInterface::getNmeaNotparsed() {
 }
 
 void GpsInterface::main() {
+  if (gps2ipEnabled()) {
+    gps2ipTick();
+    Gps2ipFix f; uint32_t at; bool linked;
+    static uint32_t clockAt = 0;
+    if (gps2ipSnapshot(f,at,linked) && f.hasUtc && clockAt != at) {
+      time_t epoch = gps2ipUtcEpoch(f);
+      struct timeval now = {epoch + (millis()-at)/1000, 0};
+      settimeofday(&now,nullptr); clockAt = at;
+    }
+    return;
+  }
   while (GPS.available()) {
     //Fetch the character one by one
     char c = GPS.read();

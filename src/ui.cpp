@@ -512,7 +512,10 @@ void UI::drawStatsNew(uint32_t currentTime, uint32_t count2g4, uint32_t count5g,
   // ---- GPS status (left) ----
   display.tft->setCursor(0, 0);
   bool has_fix = gps.getFixStatus();
-  if (has_fix) {
+  if (gps.usesPhoneGps()) {
+    display.tft->setTextColor(has_fix ? ST77XX_GREEN : ST77XX_RED, ST77XX_BLACK);
+    display.tft->print("BLE " + gps.getGpsSourceStatus() + "  ");
+  } else if (has_fix) {
     display.tft->setTextColor(ST77XX_GREEN, ST77XX_BLACK);
     display.tft->print(String(gpsSats) + " sats  ");
   } else {

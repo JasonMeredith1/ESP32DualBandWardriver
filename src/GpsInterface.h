@@ -40,6 +40,9 @@ class GpsInterface {
   public:
     void begin();
     void main();
+    bool usesPhoneGps();
+    String getGpsSourceStatus();
+    String getWiglePosition();
 
     int getNumSats();
     String getNumSatsString();

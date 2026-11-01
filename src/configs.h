@@ -30,7 +30,7 @@
 #endif
 
 //// Firmware info stuff
-#define FIRMWARE_VERSION "v2.4.0"
+#define FIRMWARE_VERSION "v2.4.0-gps2ip.1"
 
 //// Role stuff
 #define SOLO
@@ -218,7 +218,7 @@
 #define STANDBY_SCAN_INTERVAL  30 * 1000   // scan for K1T every 30s while in standby (no GPS)
 
 //// Settings JSON buffer — bumped from 2048 to handle 32 settings entries
-#define SETTINGS_JSON_SIZE     4096
+#define SETTINGS_JSON_SIZE     6144
 
 // ============================================================
 // Chunk 6: Dock mode state constants

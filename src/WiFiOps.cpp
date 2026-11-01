@@ -1,4 +1,5 @@
 #include "WiFiOps.h"
+#include "Gps2ipBLE.h"
 #include "BatteryInterface.h"
 #include "ChannelDwell.h"
 #include "WigleFormat.h"
@@ -102,8 +103,13 @@ WebServer server(80);
 
 
 class scanCallbacks : public NimBLEScanCallbacks {
+  void onResult(const NimBLEAdvertisedDevice* device) override {
+    gps2ipOnAdvertisement(device); // includes service UUIDs in scan responses
+  }
+
 
   void onDiscovered(const NimBLEAdvertisedDevice* advertisedDevice) override {
+    gps2ipOnAdvertisement(advertisedDevice);
     extern WiFiOps wifi_ops;
 
     uint8_t macBytes[6];
@@ -127,7 +133,9 @@ class scanCallbacks : public NimBLEScanCallbacks {
         if (gps.getFixStatus())
           do_save = true;
 
-        String wardrive_line = (String)advertisedDevice->getAddress().toString().c_str() + ",,[BLE]," + gps.getDatetime() + ",0,0," + (String)advertisedDevice->getRSSI() + "," + gps.getLat() + "," + gps.getLon() + "," + gps.getAlt() + "," + gps.getAccuracy() + ",,0,BLE";
+        String position = gps.getWiglePosition();
+        if (gps.usesPhoneGps() && position.isEmpty()) return;
+        String wardrive_line = (String)advertisedDevice->getAddress().toString().c_str() + ",,[BLE]," + gps.getDatetime() + ",0,0," + (String)advertisedDevice->getRSSI() + "," + position + ",,0,BLE";
         Logger::log(GUD_MSG, (String)wifi_ops.mac_history_cursor + " | " + wardrive_line);
 
         if (do_save)
@@ -1110,6 +1118,8 @@ void WiFiOps::OnDataRecv(const esp_now_recv_info_t* info, const uint8_t* data, i
             if (rec.type == "B")
               type = "BLE";
 
+            String position = gps.getWiglePosition();
+            if (gps.usesPhoneGps() && position.isEmpty()) return;
             const uint16_t frequency = type == "WIFI" ? wigleFrequencyMHz(rec.channel) : 0;
             String wardrive_line =
               rec.bssid + "," +
@@ -1119,10 +1129,7 @@ void WiFiOps::OnDataRecv(const esp_now_recv_info_t* info, const uint8_t* data, i
               (String)rec.channel + "," +
               (String)frequency + "," +
               (String)rec.rssi + "," +
-              gps.getLat() + "," +
-              gps.getLon() + "," +
-              gps.getAlt() + "," +
-              gps.getAccuracy() + ",,0," +
+              position + ",,0," +
               type;
 
             Logger::log(GUD_MSG, wardrive_line);
@@ -1380,6 +1387,7 @@ uint32_t WiFiOps::getCurrentBLECount() {
 
 void WiFiOps::scanBLE() {
   //Logger::log(STD_MSG, "Starting BLE scan...");
+  if (!ble_initialized || pBLEScan == nullptr || pBLEScan->isScanning()) return;
   pBLEScan->clearResults();
   pBLEScan->start(BLE_SCAN_DURATION, false, false);
   //Logger::log(STD_MSG, "Completed BLE scan");
@@ -1787,8 +1795,10 @@ uint16_t WiFiOps::processWardrive(uint16_t networks) {
           //display_obj.display_buffer->add(display_string);
         #endif
 
+        String position = gps.getWiglePosition();
+        if (gps.usesPhoneGps() && position.isEmpty()) continue;
         const uint16_t channel = WiFi.channel(i);
-        String wardrive_line = WiFi.BSSIDstr(i) + "," + ssid + "," + this->security_int_to_string(WiFi.encryptionType(i)) + "," + gps.getDatetime() + "," + (String)channel + "," + (String)wigleFrequencyMHz(channel) + "," + (String)WiFi.RSSI(i) + "," + gps.getLat() + "," + gps.getLon() + "," + gps.getAlt() + "," + gps.getAccuracy() + ",,0,WIFI";
+        String wardrive_line = WiFi.BSSIDstr(i) + "," + ssid + "," + this->security_int_to_string(WiFi.encryptionType(i)) + "," + gps.getDatetime() + "," + (String)channel + "," + (String)wigleFrequencyMHz(channel) + "," + (String)WiFi.RSSI(i) + "," + position + ",,0,WIFI";
         Logger::log(GUD_MSG, (String)this->mac_history_cursor + " | " + wardrive_line);
 
         #ifdef HAS_ACTIVITY_LED
@@ -1796,7 +1806,7 @@ uint16_t WiFiOps::processWardrive(uint16_t networks) {
           digitalWrite(LED_PIN, LOW);
         #endif
 
-        if (do_save) {
+        if (do_save && (!gps.usesPhoneGps() || gps.getFixStatus())) {
           buffer.append(wardrive_line + "\n");
         }
       }
@@ -2006,6 +2016,7 @@ void WiFiOps::deinitBLE() {
     Logger::log(STD_MSG, "BLE already deinitialized, skipping");
     return;
   }
+  gps2ipBleStopping(); // suspend phone connection before NimBLE host teardown
   Logger::log(STD_MSG, "Deinitializing BLE...");
 
   if (pBLEScan != nullptr) {
@@ -2053,6 +2064,7 @@ void WiFiOps::initBLE() {
   pBLEScan->setDuplicateFilter(false);       // Disables internal filtering based on MAC
   pBLEScan->setMaxResults(0);                // Prevent storing results in NimBLEScanResults
   ble_initialized = true;
+  gps2ipBleReady();
 }
 
 bool WiFiOps::tryConnectToWiFi(unsigned long timeoutMs) {
@@ -2602,6 +2614,19 @@ void WiFiOps::serveConfigPage() {
     html += "<h2>JCMK C5 Wardriver &mdash; Configuration</h2>";
     html += "<form action=\"/save\" method=\"POST\">";
 
+    String phoneName = settings.loadSetting<String>(GPS2IP_DEVICE_NAME);
+    phoneName.replace("&", "&amp;"); phoneName.replace("\"", "&quot;");
+    phoneName.replace("<", "&lt;"); phoneName.replace(">", "&gt;");
+    bool usePhone = settings.loadSetting<bool>(GPS2IP_ENABLED_NAME);
+    html += "<h3>GPS source (restart after saving)</h3>";
+    html += "<select name=\"gps_source\"><option value=\"uart\"";
+    if (!usePhone) html += " selected";
+    html += ">Wired UART GPS (default)</option><option value=\"gps2ip_ble\"";
+    if (usePhone) html += " selected";
+    html += ">GPS2IP phone via BLE</option></select><br>";
+    html += "Phone advertised BLE name (optional): <input name=\"gps2ip_name\" maxlength=\"64\" value=\"" + phoneName + "\"><br>";
+    html += "<small>BLE GPS status: " + gps.getGpsSourceStatus() + ". Phone fixes expire after 5 seconds. GPS2IP must provide UTC time.</small><br>";
+
     // ---- Network ----
     html += "<h3>Network</h3>";
     html += "<small>Network to connect at boot for web UI access (e.g. home WiFi) - separate from Trigger SSID</small><br><br>";
@@ -2820,6 +2845,17 @@ void WiFiOps::serveConfigPage() {
       }
     }
 
+    if (server.hasArg("gps_source")) {
+      String source = server.arg("gps_source");
+      if (source == "uart" || source == "gps2ip_ble") {
+        settings.saveSetting<bool>(GPS2IP_ENABLED_NAME, source == "gps2ip_ble");
+        anyChange = true;
+      }
+    }
+    if (server.hasArg("gps2ip_name")) {
+      settings.saveSetting<bool>(GPS2IP_DEVICE_NAME, server.arg("gps2ip_name").substring(0,64));
+      anyChange = true;
+    }
     // Network
     if (server.hasArg("ssid") && server.arg("ssid") != "") {
       this->user_ap_ssid = server.arg("ssid");
@@ -2981,7 +3017,7 @@ void WiFiOps::serveConfigPage() {
     this->reloadGeofenceCache();
 
     server.send(200, "text/html",
-      "<html><body><h3>Settings saved.</h3>"
+      "<html><body><h3>Settings saved. Restart to apply GPS source/name changes.</h3>"
       "<a href=\"/\">Back</a></body></html>");
 
     this->last_web_client_activity = 0;
