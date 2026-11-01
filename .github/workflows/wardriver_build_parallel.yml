@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - gps2ip-ble
     tags:
       - "*"
   pull_request:
@@ -22,6 +23,10 @@ jobs:
             -Isrc src/ChannelDwell.cpp tools/test_channel_dwell.cpp \
             -o /tmp/test_channel_dwell
           /tmp/test_channel_dwell
+      - name: Test GPS2IP packets and freshness
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -fsanitize=address,undefined tools/test_gps2ip_packet.cpp -o /tmp/gps2ip-test
+          /tmp/gps2ip-test
       - name: Test BLE lifecycle contract
         run: python3 tools/test_ble_lifecycle.py
       - name: Test Node Wi-Fi counter contract
@@ -216,6 +221,19 @@ jobs:
           extra-arduino-cli-args: "--warnings none --build-property compiler.cpp.extra_flags='-D${{ matrix.board.flag }}'"
           arduino-platform: esp32:esp32@${{ matrix.board.idf_ver }}
           platform-url: https://github.com/espressif/arduino-esp32/releases/download/${{ matrix.board.idf_ver }}/package_esp32_dev_index.json
+
+      - name: Package GPS2IP merged firmware and notes
+        run: |
+          mkdir -p gps2ip-artifact
+          cp ./src/build/esp32.esp32.${{ matrix.board.build_dir }}/src.ino.merged.bin gps2ip-artifact/
+          cp GPS2IP.md CHANGELOG_GPS2IP.md LICENSE gps2ip-artifact/
+      - name: Upload GPS2IP complete firmware
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: GPS2IP-${{ matrix.board.file_name }}
+          path: gps2ip-artifact/
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Rename C5 Wardriver ${{ matrix.board.name }} bin
         run: |
